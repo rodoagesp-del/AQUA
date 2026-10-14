@@ -7,8 +7,8 @@
 let isDev = false;
 let historicoDatos = [];
 let miGrafico = null;
+let fechaFiltroActual = ""; // NUEVO: Almacena la fecha seleccionada en el filtro
 
-// 1. CORRECCIÓN: El nombre debe coincidir exactamente con Google Sheets ("Sedapal")
 let configSistemas = JSON.parse(localStorage.getItem('prorrateo_config')) || {
     "Sedapal": ["Piso3", "Piso4", "Goma Ines", "Tio Beto"],
     "Enel": ["Piso3", "Piso4"]
@@ -58,6 +58,7 @@ async function cargarDatos() {
         historicoDatos = await apiObtenerDatos();
         renderizarSelectoresServicio();
         renderizarInputsUsuarios();
+        renderizarFiltroFechas(); // Inicializa y extrae las fechas
         renderizarTablaYTarjetas();
         renderizarGrafica();
     } catch (e) {
@@ -87,8 +88,10 @@ function renderizarSelectoresServicio() {
 
 function cambiarServicioActual(selectElement) {
     servicioActual = selectElement.value;
+    fechaFiltroActual = ""; // Resetea el filtro al cambiar de servicio
     renderizarSelectoresServicio();
     renderizarInputsUsuarios();
+    renderizarFiltroFechas(); // Recarga las fechas del nuevo servicio
     renderizarTablaYTarjetas();
     renderizarGrafica();
 }
@@ -134,6 +137,52 @@ function guardarConfiguracion() {
 }
 
 // --------------------------------------------
+// GESTIÓN DE FILTRO DE FECHAS
+// --------------------------------------------
+function renderizarFiltroFechas() {
+    const select = document.getElementById('filtro-fecha');
+    if (!select) return;
+
+    // Filtrar los datos para el servicio actual
+    const datosFiltrados = historicoDatos.filter(d => d['Servicio'] === servicioActual);
+    
+    // Obtener las fechas, convertirlas a objeto Date para ordenarlas de más nueva a más antigua
+    let fechasObj = datosFiltrados
+        .filter(d => d['Fecha Medicion'])
+        .map(d => new Date(d['Fecha Medicion']))
+        .sort((a, b) => b.getTime() - a.getTime());
+
+    // Extraer strings de fecha únicos
+    const fechasUnicas = [...new Set(fechasObj.map(d => d.toLocaleDateString()))];
+
+    if (fechasUnicas.length === 0) {
+        select.innerHTML = '<option value="">Sin datos</option>';
+        fechaFiltroActual = "";
+        return;
+    }
+
+    // Si no hay filtro o el seleccionado ya no existe, asignamos por defecto la fecha más reciente (índice 0)
+    if (!fechaFiltroActual || !fechasUnicas.includes(fechaFiltroActual)) {
+        if (fechaFiltroActual !== 'TODAS') {
+            fechaFiltroActual = fechasUnicas[0];
+        }
+    }
+
+    // Construir el HTML del selector
+    let html = '<option value="TODAS">Ver Todas</option>';
+    fechasUnicas.forEach(f => {
+        html += `<option value="${f}" ${f === fechaFiltroActual ? 'selected' : ''}>${f}</option>`;
+    });
+    
+    select.innerHTML = html;
+}
+
+function cambiarFechaFiltro(selectElement) {
+    fechaFiltroActual = selectElement.value;
+    renderizarTablaYTarjetas(); // Redibuja la tabla según el filtro
+}
+
+// --------------------------------------------
 // RENDERIZADO DINÁMICO E HISTÓRICO
 // --------------------------------------------
 function renderizarInputsUsuarios() {
@@ -146,7 +195,6 @@ function renderizarInputsUsuarios() {
     usuarios.forEach((usuario, index) => {
         let ultimaMedida2 = "";
         
-        // CORRECCIÓN: Filtro robusto por nombre de columna
         const registrosServicio = historicoDatos.filter(d => 
             d['Servicio'] === servicioActual && 
             d['Usuario'] === usuario
@@ -180,19 +228,27 @@ function renderizarTablaYTarjetas() {
     tbody.innerHTML = '';
     tarjetasCont.innerHTML = '';
     
-    // CORRECCIÓN: Filtro robusto por nombre de columna
+    // NUEVO: Filtro combinado de Servicio + Fecha Seleccionada
     const datosMostrar = historicoDatos
-        .filter(d => d['Servicio'] === servicioActual)
-        .reverse();
+        .filter(d => {
+            if (d['Servicio'] !== servicioActual) return false;
+            
+            // Si el filtro de fecha está activo y no es "TODAS"
+            if (fechaFiltroActual && fechaFiltroActual !== 'TODAS') {
+                const fechaRegistro = d['Fecha Medicion'] ? new Date(d['Fecha Medicion']).toLocaleDateString() : '';
+                return fechaRegistro === fechaFiltroActual;
+            }
+            return true;
+        })
+        .reverse(); // Mantiene el orden de más reciente arriba cuando se selecciona "Ver Todas"
 
     if (datosMostrar.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-gray-500">No hay datos para este servicio.</td></tr>';
-        tarjetasCont.innerHTML = '<div class="text-center py-4 text-gray-500">No hay datos para este servicio.</div>';
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-gray-500">No hay datos para esta fecha o servicio.</td></tr>';
+        tarjetasCont.innerHTML = '<div class="text-center py-4 text-gray-500">No hay datos para esta fecha o servicio.</div>';
         return;
     }
 
     datosMostrar.forEach((fila, index) => {
-        // CORRECCIÓN: Lectura robusta llamando exactamente al nombre de la cabecera
         const fechaStr = fila['Fecha Medicion'] ? new Date(fila['Fecha Medicion']).toLocaleDateString() : '-';
         const usuario = fila['Usuario'] || '-';
         const med1 = fila['Medida 1'] || '-';
@@ -236,14 +292,13 @@ function renderizarTablaYTarjetas() {
 }
 
 // --------------------------------------------
-// RENDERIZADO DE GRÁFICA
+// RENDERIZADO DE GRÁFICA (INDEPENDIENTE DEL FILTRO DE FECHAS)
 // --------------------------------------------
 function renderizarGrafica() {
     const canvas = document.getElementById('graficaConsumo');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     
-    // CORRECCIÓN: Filtro robusto
     const datosFiltrados = historicoDatos.filter(d => d['Servicio'] === servicioActual);
     const fechasRaw = [...new Set(datosFiltrados.map(d => d['Fecha Medicion']))];
     const labels = fechasRaw.map(f => new Date(f).toLocaleDateString());
