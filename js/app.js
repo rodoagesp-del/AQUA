@@ -1,19 +1,37 @@
 // ============================================
 // CONTROLADOR PRINCIPAL DE LA VISTA
-// Este archivo controla la interfaz, botones,
-// alertas, tabla y gráfico. Llama a math.js y api.js
+// Este archivo controla la interfaz, botones, alertas, tabla y gráfico.
 // ============================================
 
 let isDev = false;
 let historicoDatos = [];
 let miGrafico = null;
-let fechaFiltroActual = ""; // NUEVO: Almacena la fecha seleccionada en el filtro
+let fechaFiltroActual = ""; // Almacena la fecha seleccionada en el filtro
 
 let configSistemas = JSON.parse(localStorage.getItem('prorrateo_config')) || {
     "Sedapal": ["Piso3", "Piso4", "Goma Ines", "Tio Beto"],
     "Enel": ["Piso3", "Piso4"]
 };
 let servicioActual = Object.keys(configSistemas)[0];
+
+// --------------------------------------------
+// FUNCIÓN AUXILIAR PARA FECHAS SEGURAS (NUEVO)
+// Evita los cuelgues por "Invalid Date"
+// --------------------------------------------
+function obtenerFechaSegura(rawDate) {
+    if (!rawDate) return '';
+    // Si la fecha ya viene como un texto con barras (ej. "11/10/2026")
+    if (typeof rawDate === 'string' && rawDate.includes('/')) return rawDate.trim();
+    
+    const d = new Date(rawDate);
+    // Si la fecha no es reconocida por el navegador
+    if (isNaN(d.getTime())) {
+        return String(rawDate).split('T')[0].trim();
+    }
+    
+    // Forzar formato consistente DD/MM/YYYY local (Perú)
+    return d.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
 
 // --------------------------------------------
 // AUTENTICACIÓN
@@ -91,7 +109,7 @@ function cambiarServicioActual(selectElement) {
     fechaFiltroActual = ""; // Resetea el filtro al cambiar de servicio
     renderizarSelectoresServicio();
     renderizarInputsUsuarios();
-    renderizarFiltroFechas(); // Recarga las fechas del nuevo servicio
+    renderizarFiltroFechas();
     renderizarTablaYTarjetas();
     renderizarGrafica();
 }
@@ -107,7 +125,7 @@ function agregarServicio() {
 }
 
 function eliminarServicio() {
-    if (confirm(`¿Seguro que deseas eliminar el servicio ${servicioActual}? Solo se borrará de tu vista, no de la base de datos.`)) {
+    if (confirm(`¿Seguro que deseas eliminar el servicio ${servicioActual}? Solo se borrará de tu vista.`)) {
         delete configSistemas[servicioActual];
         guardarConfiguracion();
         servicioActual = Object.keys(configSistemas)[0] || "";
@@ -137,23 +155,20 @@ function guardarConfiguracion() {
 }
 
 // --------------------------------------------
-// GESTIÓN DE FILTRO DE FECHAS
+// GESTIÓN DE FILTRO DE FECHAS MEJORADO
 // --------------------------------------------
 function renderizarFiltroFechas() {
     const select = document.getElementById('filtro-fecha');
     if (!select) return;
 
-    // Filtrar los datos para el servicio actual
     const datosFiltrados = historicoDatos.filter(d => d['Servicio'] === servicioActual);
     
-    // Obtener las fechas, convertirlas a objeto Date para ordenarlas de más nueva a más antigua
-    let fechasObj = datosFiltrados
-        .filter(d => d['Fecha Medicion'])
-        .map(d => new Date(d['Fecha Medicion']))
-        .sort((a, b) => b.getTime() - a.getTime());
+    // Extraer fechas formateadas únicas, ignorando valores vacíos
+    let fechasUnicas = [...new Set(datosFiltrados.map(d => obtenerFechaSegura(d['Fecha Medicion'])))].filter(f => f !== '');
 
-    // Extraer strings de fecha únicos
-    const fechasUnicas = [...new Set(fechasObj.map(d => d.toLocaleDateString()))];
+    // Como los datos nuevos de Google Sheets siempre entran al final,
+    // usamos reverse() para poner la fecha más reciente arriba.
+    fechasUnicas.reverse();
 
     if (fechasUnicas.length === 0) {
         select.innerHTML = '<option value="">Sin datos</option>';
@@ -161,14 +176,13 @@ function renderizarFiltroFechas() {
         return;
     }
 
-    // Si no hay filtro o el seleccionado ya no existe, asignamos por defecto la fecha más reciente (índice 0)
+    // Asignar fecha inicial si no hay filtro activo o si la seleccionada ya no existe
     if (!fechaFiltroActual || !fechasUnicas.includes(fechaFiltroActual)) {
         if (fechaFiltroActual !== 'TODAS') {
-            fechaFiltroActual = fechasUnicas[0];
+            fechaFiltroActual = fechasUnicas[0]; // Selecciona la más reciente
         }
     }
 
-    // Construir el HTML del selector
     let html = '<option value="TODAS">Ver Todas</option>';
     fechasUnicas.forEach(f => {
         html += `<option value="${f}" ${f === fechaFiltroActual ? 'selected' : ''}>${f}</option>`;
@@ -179,7 +193,7 @@ function renderizarFiltroFechas() {
 
 function cambiarFechaFiltro(selectElement) {
     fechaFiltroActual = selectElement.value;
-    renderizarTablaYTarjetas(); // Redibuja la tabla según el filtro
+    renderizarTablaYTarjetas();
 }
 
 // --------------------------------------------
@@ -228,28 +242,27 @@ function renderizarTablaYTarjetas() {
     tbody.innerHTML = '';
     tarjetasCont.innerHTML = '';
     
-    // NUEVO: Filtro combinado de Servicio + Fecha Seleccionada
+    // Filtro combinado de Servicio + Fecha Seleccionada
     const datosMostrar = historicoDatos
         .filter(d => {
             if (d['Servicio'] !== servicioActual) return false;
             
-            // Si el filtro de fecha está activo y no es "TODAS"
             if (fechaFiltroActual && fechaFiltroActual !== 'TODAS') {
-                const fechaRegistro = d['Fecha Medicion'] ? new Date(d['Fecha Medicion']).toLocaleDateString() : '';
+                const fechaRegistro = obtenerFechaSegura(d['Fecha Medicion']);
                 return fechaRegistro === fechaFiltroActual;
             }
             return true;
         })
-        .reverse(); // Mantiene el orden de más reciente arriba cuando se selecciona "Ver Todas"
+        .reverse();
 
     if (datosMostrar.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-gray-500">No hay datos para esta fecha o servicio.</td></tr>';
-        tarjetasCont.innerHTML = '<div class="text-center py-4 text-gray-500">No hay datos para esta fecha o servicio.</div>';
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-gray-500">No hay datos para esta fecha.</td></tr>';
+        tarjetasCont.innerHTML = '<div class="text-center py-4 text-gray-500">No hay datos para esta fecha.</div>';
         return;
     }
 
     datosMostrar.forEach((fila, index) => {
-        const fechaStr = fila['Fecha Medicion'] ? new Date(fila['Fecha Medicion']).toLocaleDateString() : '-';
+        const fechaStr = obtenerFechaSegura(fila['Fecha Medicion']) || '-';
         const usuario = fila['Usuario'] || '-';
         const med1 = fila['Medida 1'] || '-';
         const med2 = fila['Medida 2'] || '-';
@@ -292,7 +305,7 @@ function renderizarTablaYTarjetas() {
 }
 
 // --------------------------------------------
-// RENDERIZADO DE GRÁFICA (INDEPENDIENTE DEL FILTRO DE FECHAS)
+// RENDERIZADO DE GRÁFICA (INDEPENDIENTE DEL FILTRO)
 // --------------------------------------------
 function renderizarGrafica() {
     const canvas = document.getElementById('graficaConsumo');
@@ -300,8 +313,7 @@ function renderizarGrafica() {
     const ctx = canvas.getContext('2d');
     
     const datosFiltrados = historicoDatos.filter(d => d['Servicio'] === servicioActual);
-    const fechasRaw = [...new Set(datosFiltrados.map(d => d['Fecha Medicion']))];
-    const labels = fechasRaw.map(f => new Date(f).toLocaleDateString());
+    const labels = [...new Set(datosFiltrados.map(d => obtenerFechaSegura(d['Fecha Medicion'])))].filter(f => f !== '');
 
     const usuariosNombres = configSistemas[servicioActual] || [];
     const colores = ['#ef4444', '#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899']; 
@@ -311,7 +323,7 @@ function renderizarGrafica() {
         const datosUsuario = labels.map((fechaLabel) => {
             const registro = datosFiltrados.find(d => 
                 d['Usuario'] === nombre && 
-                new Date(d['Fecha Medicion']).toLocaleDateString() === fechaLabel
+                obtenerFechaSegura(d['Fecha Medicion']) === fechaLabel
             );
             return registro ? registro['Pago Individual'] : 0; 
         });
