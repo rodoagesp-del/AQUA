@@ -1,0 +1,14 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+
+body { 
+    font-family: 'Inter', sans-serif; 
+}
+
+/* Animación suave para botones */
+.btn-animate { 
+    transition: transform 0.1s ease-in-out, box-shadow 0.1s ease-in-out; 
+}
+
+.btn-animate:active { 
+    transform: scale(0.97); 
+}
