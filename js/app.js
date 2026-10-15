@@ -237,10 +237,18 @@ function renderizarInputsUsuarios() {
 function renderizarTablaYTarjetas() {
     const tbody = document.getElementById('tabla-container');
     const tarjetasCont = document.getElementById('tarjetas-mobile');
+    const resumenCont = document.getElementById('resumen-fecha-container'); // NUEVO: Elemento del resumen
+    
     if (!tbody || !tarjetasCont) return;
     
     tbody.innerHTML = '';
     tarjetasCont.innerHTML = '';
+    
+    // Ocultar el resumen por defecto al recargar
+    if (resumenCont) {
+        resumenCont.innerHTML = '';
+        resumenCont.classList.add('hidden');
+    }
     
     // Filtro combinado de Servicio + Fecha Seleccionada
     const datosMostrar = historicoDatos
@@ -261,6 +269,29 @@ function renderizarTablaYTarjetas() {
         return;
     }
 
+    // NUEVO: Mostrar la tarjeta de resumen SOLO si hay una fecha específica seleccionada
+    if (fechaFiltroActual && fechaFiltroActual !== 'TODAS' && resumenCont) {
+        // Al ser la misma fecha, todos los registros comparten el mismo Consumo y Costo General, tomamos el del primer elemento [0]
+        const consumoGral = datosMostrar[0]['Consumo General'] || '-';
+        const costoGral = datosMostrar[0]['Costo General'] || '-';
+        
+        resumenCont.innerHTML = `
+            <div class="flex flex-col md:flex-row justify-between items-center bg-gradient-to-r from-indigo-50 to-blue-50 border border-indigo-100 p-4 rounded-xl shadow-sm gap-4">
+                <div class="w-full md:w-1/2 text-center md:text-left">
+                    <span class="block text-xs font-bold text-indigo-500 uppercase tracking-wider mb-1">Consumo General de la Fecha</span>
+                    <span class="text-2xl font-black text-indigo-900">${consumoGral}</span>
+                </div>
+                <div class="hidden md:block w-px h-10 bg-indigo-200"></div>
+                <div class="w-full md:w-1/2 text-center md:text-left border-t md:border-t-0 border-indigo-100 pt-3 md:pt-0">
+                    <span class="block text-xs font-bold text-green-600 uppercase tracking-wider mb-1">Costo General de la Fecha</span>
+                    <span class="text-2xl font-black text-green-700">S/ ${costoGral}</span>
+                </div>
+            </div>
+        `;
+        resumenCont.classList.remove('hidden'); // Lo hacemos visible
+    }
+
+    // Ciclo para imprimir los usuarios (sigue igual)
     datosMostrar.forEach((fila, index) => {
         const fechaStr = obtenerFechaSegura(fila['Fecha Medicion']) || '-';
         const usuario = fila['Usuario'] || '-';
